@@ -1,6 +1,9 @@
+"use server";
+
 import { db } from './dbConfig';
-import { Users, Reports, Rewards, CollectedWastes, Notifications, Transactions } from './schema';
-import { eq, sql, and, desc } from 'drizzle-orm';
+import { Users, Reports, Rewards, CollectedWastes, Notifications, Transactions, WasteCases } from './schema';
+import { eq, sql, and, desc, asc, gte, inArray, isNotNull } from 'drizzle-orm';
+import { formatMyanmarDateTime } from '@/utils/dateTime';
 
 export async function createUser(email: string, name: string) {
   try {
@@ -27,8 +30,6 @@ export async function createReport(
   location: string,
   wasteType: string,
   amount: string,
-  imageUrl?: string,
-  type?: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   verificationResult?: any
 ) {
@@ -40,7 +41,6 @@ export async function createReport(
         location,
         wasteType,
         amount,
-        imageUrl,
         verificationResult,
         status: "pending",
       })
@@ -49,6 +49,10 @@ export async function createReport(
 
     // Award 10 points for reporting waste
     const pointsEarned = 10;
+    const reward = await getOrCreateReward(userId);
+    if (!reward) {
+      throw new Error("The reporter's reward account could not be created.");
+    }
     await updateRewardPoints(userId, pointsEarned);
 
     // Create a transaction for the earned points
@@ -100,13 +104,17 @@ export async function getOrCreateReward(userId: number) {
 
 export async function updateRewardPoints(userId: number, pointsToAdd: number) {
   try {
+    const rewardAccount = await getOrCreateReward(userId);
+    if (!rewardAccount) {
+      throw new Error("Reward account could not be created.");
+    }
     const [updatedReward] = await db
       .update(Rewards)
       .set({ 
         points: sql`${Rewards.points} + ${pointsToAdd}`,
         updatedAt: new Date()
       })
-      .where(eq(Rewards.userId, userId))
+      .where(eq(Rewards.id, rewardAccount.id))
       .returning()
       .execute();
     return updatedReward;
@@ -223,21 +231,50 @@ export async function getWasteCollectionTasks(limit: number = 20) {
     const tasks = await db
       .select({
         id: Reports.id,
+        userId: Reports.userId,
         location: Reports.location,
         wasteType: Reports.wasteType,
         amount: Reports.amount,
+        imageUrl: Reports.imageUrl,
         status: Reports.status,
         date: Reports.createdAt,
+        latitude: Reports.latitude,
+        longitude: Reports.longitude,
         collectorId: Reports.collectorId,
+        caseId: Reports.caseId,
+        verifiedAt: CollectedWastes.collectionDate,
       })
       .from(Reports)
-      .limit(limit)
+      .leftJoin(CollectedWastes, eq(CollectedWastes.reportId, Reports.id))
+      .orderBy(asc(Reports.createdAt))
+      .limit(Math.max(limit * 5, 100))
       .execute();
 
-    return tasks.map(task => ({
-      ...task,
-      date: task.date.toISOString().split('T')[0], // Format date as YYYY-MM-DD
-    }));
+    const visibleTasks = tasks.filter(
+      (task, index, allTasks) =>
+        task.caseId === null ||
+        allTasks.findIndex((candidate) => candidate.caseId === task.caseId) === index
+    );
+
+    return visibleTasks.slice(0, limit).map(task => {
+      const confirmationCount = task.caseId
+        ? new Set(
+            tasks
+              .filter((candidate) => candidate.caseId === task.caseId)
+              .map((candidate) => candidate.id)
+          ).size
+        : 1;
+
+      return {
+        ...task,
+        createdAt: task.date.toISOString(),
+        date: formatMyanmarDateTime(task.date),
+        confirmationCount,
+        verifiedAt: task.verifiedAt
+          ? formatMyanmarDateTime(task.verifiedAt)
+          : null,
+      };
+    });
   } catch (error) {
     console.error("Error fetching waste collection tasks:", error);
     return [];
@@ -246,18 +283,10 @@ export async function getWasteCollectionTasks(limit: number = 20) {
 
 export async function saveReward(userId: number, amount: number) {
   try {
-    const [reward] = await db
-      .insert(Rewards)
-      .values({
-        userId,
-        name: 'Waste Collection Reward',
-        collectionInfo: 'Points earned from waste collection',
-        points: amount,
-        level: 1,
-        isAvailable: true,
-      })
-      .returning()
-      .execute();
+    const reward = await updateRewardPoints(userId, amount);
+    if (!reward) {
+      throw new Error("Collection reward could not be saved.");
+    }
     
     // Create a transaction for this reward
     await createTransaction(userId, 'earned_collect', amount, 'Points earned for collecting waste');
@@ -290,18 +319,50 @@ export async function saveCollectedWaste(reportId: number, collectorId: number) 
 
 export async function updateTaskStatus(reportId: number, newStatus: string, collectorId?: number) {
   try {
+    const [targetReport] = await db
+      .select({ reporterId: Reports.userId, caseId: Reports.caseId })
+      .from(Reports)
+      .where(eq(Reports.id, reportId))
+      .limit(1)
+      .execute();
+
+    if (!targetReport) {
+      throw new Error("Waste report not found.");
+    }
+
+    if (collectorId !== undefined) {
+      if (targetReport.reporterId === collectorId) {
+        throw new Error("You cannot collect waste that you reported.");
+      }
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = { status: newStatus };
     if (collectorId !== undefined) {
       updateData.collectorId = collectorId;
     }
-    const [updatedReport] = await db
+    const updatedReports = await db
       .update(Reports)
       .set(updateData)
-      .where(eq(Reports.id, reportId))
+      .where(
+        targetReport.caseId
+          ? eq(Reports.caseId, targetReport.caseId)
+          : eq(Reports.id, reportId)
+      )
       .returning()
       .execute();
-    return updatedReport;
+
+    if (targetReport.caseId) {
+      await db
+        .update(WasteCases)
+        .set({
+          status: newStatus === "verified" ? "verified" : newStatus,
+          updatedAt: new Date(),
+        })
+        .where(eq(WasteCases.id, targetReport.caseId));
+    }
+
+    return updatedReports.find((report) => report.id === reportId);
   } catch (error) {
     console.error("Error updating task status:", error);
     throw error;
@@ -365,45 +426,16 @@ export async function getRewardTransactions(userId: number) {
 
 export async function getAvailableRewards(userId: number) {
   try {
-    // console.log('Fetching available rewards for user:', userId);
-    
-    // Get user's total points
-    const userTransactions = await getRewardTransactions(userId);
-    const userPoints = userTransactions.reduce((total, transaction) => {
-      return transaction.type.startsWith('earned') ? total + transaction.amount : total - transaction.amount;
-    }, 0);
-
-    // console.log('User total points:', userPoints);
-
-    // Get available rewards from the database
-    const dbRewards = await db
-      .select({
-        id: Rewards.id,
-        name: Rewards.name,
-        cost: Rewards.points,
-        description: Rewards.description,
-        collectionInfo: Rewards.collectionInfo,
-      })
-      .from(Rewards)
-      .where(eq(Rewards.isAvailable, true))
-      .execute();
-
-    console.log('Rewards from database:', dbRewards);
-
-    // Combine user points and database rewards
-    const allRewards = [
+    const userPoints = await getUserRewardBalance(userId);
+    return [
       {
-        id: 0, // Use a special ID for user's points
+        id: 0,
         name: "Your Points",
         cost: userPoints,
         description: "Redeem your earned points",
         collectionInfo: "Points earned from reporting and collecting waste"
-      },
-      ...dbRewards
+      }
     ];
-
-    console.log('All available rewards:', allRewards);
-    return allRewards;
   } catch (error) {
     console.error("Error fetching available rewards:", error);
     return [];
@@ -426,58 +458,55 @@ export async function createTransaction(userId: number, type: 'earned_report' | 
 
 export async function redeemReward(userId: number, rewardId: number) {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userReward = await getOrCreateReward(userId) as any;
-    
+    const currentBalance = await getUserRewardBalance(userId);
+    if (currentBalance <= 0) {
+      throw new Error("No points are available to redeem.");
+    }
+
     if (rewardId === 0) {
-      // Redeem all points
-      const [updatedReward] = await db.update(Rewards)
-        .set({ 
+      await db
+        .update(Rewards)
+        .set({
           points: 0,
           updatedAt: new Date(),
         })
         .where(eq(Rewards.userId, userId))
-        .returning()
         .execute();
 
-      // Create a transaction for this redemption
-      await createTransaction(userId, 'redeemed', userReward.points, `Redeemed all points: ${userReward.points}`);
-
-      return updatedReward;
-    } else {
-      // Existing logic for redeeming specific rewards
-      const availableReward = await db.select().from(Rewards).where(eq(Rewards.id, rewardId)).execute();
-
-      if (!userReward || !availableReward[0] || userReward.points < availableReward[0].points) {
-        throw new Error("Insufficient points or invalid reward");
-      }
-
-      const [updatedReward] = await db.update(Rewards)
-        .set({ 
-          points: sql`${Rewards.points} - ${availableReward[0].points}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(Rewards.userId, userId))
-        .returning()
-        .execute();
-
-      // Create a transaction for this redemption
-      await createTransaction(userId, 'redeemed', availableReward[0].points, `Redeemed: ${availableReward[0].name}`);
-
-      return updatedReward;
+      await createTransaction(
+        userId,
+        'redeemed',
+        currentBalance,
+        `Redeemed all points: ${currentBalance}`
+      );
+      return { points: 0, redeemed: currentBalance };
     }
+
+    throw new Error("Invalid reward selection.");
   } catch (error) {
     console.error("Error redeeming reward:", error);
     throw error;
   }
 }
 
+export async function getUserRewardBalance(userId: number): Promise<number> {
+  const rewardRows = await db
+    .select({ points: Rewards.points })
+    .from(Rewards)
+    .where(eq(Rewards.userId, userId))
+    .execute();
+
+  return Math.max(
+    rewardRows.reduce(
+      (total, reward) => total + (Number(reward.points) || 0),
+      0
+    ),
+    0
+  );
+}
+
 export async function getUserBalance(userId: number): Promise<number> {
-  const transactions = await getRewardTransactions(userId);
-  const balance = transactions.reduce((acc, transaction) => {
-    return transaction.type.startsWith('earned') ? acc + transaction.amount : acc - transaction.amount
-  }, 0);
-  return Math.max(balance, 0); // Ensure balance is never negative
+  return getUserRewardBalance(userId);
 }
 
 
@@ -490,4 +519,157 @@ export async function getUserRoleByEmail(email: string) {
     console.error("Error fetching user by email:", error);
     return null;
   }
+}
+
+const DUPLICATE_RADIUS_METRES = 50;
+const DUPLICATE_WINDOW_HOURS = 72;
+const AUTO_LINK_CONFIDENCE = 0.9;
+
+function distanceInMetres(
+  latitudeA: number,
+  longitudeA: number,
+  latitudeB: number,
+  longitudeB: number
+) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const earthRadiusMetres = 6_371_000;
+  const latitudeDelta = radians(latitudeB - latitudeA);
+  const longitudeDelta = radians(longitudeB - longitudeA);
+  const a =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(latitudeA)) *
+      Math.cos(radians(latitudeB)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return earthRadiusMetres * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export async function getDuplicateCandidates(latitude: number, longitude: number) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return [];
+
+  const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_HOURS * 60 * 60 * 1000);
+  const reports = await db
+    .select({
+      reportId: Reports.id,
+      imageUrl: Reports.imageUrl,
+      latitude: Reports.latitude,
+      longitude: Reports.longitude,
+    })
+    .from(Reports)
+    .where(
+      and(
+        inArray(Reports.status, ["pending", "in_progress"]),
+        gte(Reports.createdAt, cutoff),
+        isNotNull(Reports.imageUrl),
+        isNotNull(Reports.latitude),
+        isNotNull(Reports.longitude)
+      )
+    )
+    .orderBy(desc(Reports.createdAt))
+    .limit(100);
+
+  return reports
+    .map((report) => ({
+      reportId: report.reportId,
+      imageUrl: report.imageUrl as string,
+      distanceMetres: distanceInMetres(
+        latitude,
+        longitude,
+        report.latitude as number,
+        report.longitude as number
+      ),
+    }))
+    .filter((report) => report.distanceMetres <= DUPLICATE_RADIUS_METRES)
+    .sort((a, b) => a.distanceMetres - b.distanceMetres)
+    .slice(0, 3);
+}
+
+export async function attachReportToWasteCase(
+  reportId: number,
+  latitude: number,
+  longitude: number,
+  imageUrl: string,
+  matchedReportId: number | null,
+  confidence: number
+) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new Error("Valid report coordinates are required.");
+  }
+  try {
+    const imageHost = new URL(imageUrl).hostname;
+    if (imageHost !== "res.cloudinary.com") throw new Error();
+  } catch {
+    throw new Error("A valid stored report image is required.");
+  }
+
+  let caseId: number | null = null;
+  let shouldLink =
+    matchedReportId !== null &&
+    matchedReportId !== reportId &&
+    confidence >= AUTO_LINK_CONFIDENCE;
+
+  if (shouldLink) {
+    const [matchedReport] = await db
+      .select({
+        caseId: Reports.caseId,
+        latitude: Reports.latitude,
+        longitude: Reports.longitude,
+        status: Reports.status,
+        createdAt: Reports.createdAt,
+      })
+      .from(Reports)
+      .where(eq(Reports.id, matchedReportId as number))
+      .limit(1);
+
+    const stillPlausible =
+      matchedReport &&
+      matchedReport.latitude !== null &&
+      matchedReport.longitude !== null &&
+      ["pending", "in_progress"].includes(matchedReport.status) &&
+      matchedReport.createdAt.getTime() >=
+        Date.now() - DUPLICATE_WINDOW_HOURS * 60 * 60 * 1000 &&
+      distanceInMetres(
+        latitude,
+        longitude,
+        matchedReport.latitude,
+        matchedReport.longitude
+      ) <= DUPLICATE_RADIUS_METRES;
+
+    if (!stillPlausible) shouldLink = false;
+
+    if (stillPlausible && matchedReport.caseId) {
+      caseId = matchedReport.caseId;
+    } else if (stillPlausible) {
+      const [wasteCase] = await db
+        .insert(WasteCases)
+        .values({ latitude, longitude })
+        .returning();
+      caseId = wasteCase.id;
+      await db
+        .update(Reports)
+        .set({ caseId })
+        .where(eq(Reports.id, matchedReportId as number));
+    }
+  }
+
+  if (!caseId) {
+    const [wasteCase] = await db
+      .insert(WasteCases)
+      .values({ latitude, longitude })
+      .returning();
+    caseId = wasteCase.id;
+  }
+
+  const [updatedReport] = await db
+    .update(Reports)
+    .set({
+      latitude,
+      longitude,
+      imageUrl,
+      caseId,
+      duplicateConfidence: shouldLink ? confidence : null,
+    })
+    .where(eq(Reports.id, reportId))
+    .returning();
+
+  return { report: updatedReport, linkedToExistingCase: shouldLink };
 }

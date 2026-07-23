@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { getAllRewards, getUserByEmail } from "@/utils/db/actions";
 import { Loader, Award, User, Trophy, Crown } from "lucide-react";
 import { toast } from "react-hot-toast";
+import { calculateUserRewardScore } from "@/lib/reward-score";
 
 type Reward = {
   id: number;
@@ -12,6 +13,30 @@ type Reward = {
   createdAt: Date;
   userName: string | null;
 };
+
+function aggregateRewardsByUser(rewards: Reward[]): Reward[] {
+  const users = new Map<number, Reward>();
+
+  for (const reward of rewards) {
+    const existing = users.get(reward.userId);
+    if (existing) {
+      existing.points += Number(reward.points) || 0;
+      existing.level = Math.max(existing.level, reward.level);
+      continue;
+    }
+
+    users.set(reward.userId, {
+      ...reward,
+      points: Number(reward.points) || 0,
+    });
+  }
+
+  for (const reward of Array.from(users.values())) {
+    reward.points = calculateUserRewardScore(rewards, reward.userId);
+  }
+
+  return Array.from(users.values()).sort((a, b) => b.points - a.points);
+}
 
 export default function LeaderboardPage() {
   const [rewards, setRewards] = useState<Reward[]>([]);
@@ -27,7 +52,7 @@ export default function LeaderboardPage() {
       setLoading(true);
       try {
         const fetchedRewards = await getAllRewards();
-        setRewards(fetchedRewards);
+        setRewards(aggregateRewardsByUser(fetchedRewards));
 
         const userEmail = localStorage.getItem("userEmail");
         if (userEmail) {
@@ -63,16 +88,16 @@ export default function LeaderboardPage() {
             <Loader className="animate-spin h-8 w-8 text-gray-600" />
           </div>
         ) : (
-          <div className="bg-white shadow-xl rounded-2xl overflow-hidden">
-            <div className="bg-gradient-to-r from-green-500 to-green-600 p-6">
+          <div className="overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="bg-gradient-to-r from-green-500 to-green-600 p-4 sm:p-6">
               <div className="flex justify-between items-center text-white">
-                <Trophy className="h-10 w-10" />
-                <span className="text-2xl font-bold">Top Performers</span>
-                <Award className="h-10 w-10" />
+                <Trophy className="h-8 w-8 sm:h-10 sm:w-10" />
+                <span className="text-lg font-bold sm:text-2xl">Top Performers</span>
+                <Award className="h-8 w-8 sm:h-10 sm:w-10" />
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[620px]">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
@@ -92,14 +117,14 @@ export default function LeaderboardPage() {
                 <tbody>
                   {rewards.map((reward, index) => (
                     <tr
-                      key={reward.id}
+                      key={reward.userId}
                       className={`${
                         user && user.id === reward.userId ? "bg-indigo-50" : ""
                       } hover:bg-gray-50 transition-colors duration-150 ease-in-out`}
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          {index < 3 ? (
+                        <div className="flex items-center gap-2">
+                          {index < 3 && (
                             <Crown
                               className={`h-6 w-6 ${
                                 index === 0
@@ -109,11 +134,10 @@ export default function LeaderboardPage() {
                                   : "text-yellow-600"
                               }`}
                             />
-                          ) : (
-                            <span className="text-sm font-medium text-gray-900">
-                              {index + 1}
-                            </span>
                           )}
+                          <span className="text-sm font-medium text-gray-900">
+                            {index + 1}
+                          </span>
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">

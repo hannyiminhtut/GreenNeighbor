@@ -1,85 +1,178 @@
-# AI-Based Smart Waste Management System
+# GreenNeighbor
 
-The **AI-Based Smart Waste Management System** is an innovative platform designed to revolutionize waste management by leveraging the power of AI and gamification. Our system enables users to report waste locations, collect and track waste efficiently, and provides a reward system to encourage active participation. This solution aims to promote community involvement in waste management while empowering staff with insightful reports based on platform data.
+**GreenNeighbor** is an AI-assisted smart waste management platform that helps
+communities report, confirm, and collect waste. It combines location-aware
+reporting, AI image verification, duplicate detection, collection workflows,
+rewards, notifications, leaderboards, and staff PDF reports in one responsive
+web application.
 
-## Features
+The product subtitle is **Smart Waste Management System**.
 
-- **Waste Reporting and Collection Tracking**: Users can report waste locations, and the system tracks the waste collection process.
-- **Data-Driven Reports for Staff**: Staff members can generate detailed reports based on platform data to gain insights into waste management activities.
-- **Gamification for User Engagement**: Users earn points based on their activity such as reporting waste locations and garbage collection, fostering community engagement.
-- **AI-Powered Waste Verification**: Utilizes Google Gemini AI to monitor waste levels, track amounts, and verify waste collection activities.
-- **Address Auto-Completion**: Integrated with Google Maps API to provide seamless address auto-completion for user convenience.
+## Current working state
 
-## Technology Stack
+The following features are implemented in the current codebase:
 
-- **Framework**: [Next.js](https://nextjs.org/) - For building the user interface and handling server-side rendering.
-- **Database**: [neonDB](https://neon.tech/) - To store and manage waste management data efficiently.
-- **AI Integration**: [Google Gemini AI API](https://ai.google/) - To track waste levels and validate collections.
-- **Authentication & Authorization**: [Web3Auth](https://web3auth.io/) - For secure user authentication and role-based access.
-- **Maps API**: [Google Maps API](https://developers.google.com/maps) - For address auto-completion and waste location mapping.
-- **UI Styling**: [Tailwind CSS](https://tailwindcss.com/) - For creating a responsive and modern user interface.
-- **Testing**: [Jest](https://jestjs.io/) - For unit testing the application and ensuring code reliability.
+- Web3Auth login using the Sapphire Devnet configuration and Ethereum Sepolia.
+- Automatic user lookup or creation from the authenticated email.
+- A redesigned, responsive GreenNeighbor header and Report Waste interface.
+- Waste-photo upload to Cloudinary through a server-side API route.
+- Gemini verification of the reported waste type, quantity, and confidence.
+- OpenStreetMap location search, reverse geocoding, browser geolocation, and
+  precise map-point selection.
+- Nearby duplicate-candidate lookup and Gemini image comparison.
+- Waste-case grouping so multiple reports can confirm one physical waste pile.
+- Recent community reports with Myanmar-time formatting.
+- Collection-task list, search, pagination, filters, and map visualization.
+- Protection that prevents users from collecting waste they reported.
+- Rule-based collector recommendation with an optional Gemini explanation.
+- AI verification of collection-completion photos.
+- Reward points, transaction history, redemption, notifications, and a
+  leaderboard.
+- Staff-only PDF reports generated with Puppeteer.
+- Jest coverage for the PDF report API and rendering helpers.
 
-![localhost-3000-10-25-2024_03_42_PM](https://github.com/user-attachments/assets/887f3bbb-e16a-40cb-8875-d6af1b793517)
-![localhost-3000-report-10-25-2024_03_43_PM](https://github.com/user-attachments/assets/d6745222-65a5-48b7-81b6-9956826eced1)
-![localhost-3000-collect-10-25-2024_03_45_PM](https://github.com/user-attachments/assets/f3b3a66c-fb22-4287-80d1-e331b48e0fe9)
-![localhost-3000-rewards-10-25-2024_03_46_PM](https://github.com/user-attachments/assets/14410d18-e2d0-4849-91b4-d3f15d680edf)
-![localhost-3000-leaderboard-10-25-2024_03_46_PM](https://github.com/user-attachments/assets/818af2e8-13d9-438f-bcc6-007bde953e19)
+## Main user workflow
 
-## Installation
+### Report waste
 
-To set up the project locally, follow these steps:
+1. Sign in through Web3Auth.
+2. Upload a clear image of the waste.
+3. Verify the image with Gemini.
+4. Search for an address or select a point on OpenStreetMap.
+5. Submit the report.
+6. The image is stored in Cloudinary, nearby reports are checked for
+   duplicates, and the report is attached to a new or existing waste case.
+7. Reporting points, a transaction, and a notification are created.
 
-1. Clone the repository:
-   
-   ```bash
-   git clone https://github.com/diaskalana/smart-waste-management-system.git
-   ```
+### Collect waste
 
-3. Navigate to the project directory:
+1. Open an available collection task.
+2. Start collection; the task is assigned to the current collector.
+3. Upload a completion photo.
+4. Gemini checks whether the waste type and quantity match the report.
+5. A successful verification completes the task and awards collector points.
 
-   ```bash
-   cd smart-waste-management-system
-   ```
+## Application routes
 
-4. Install dependencies:
+| Route | Purpose |
+|---|---|
+| `/` | Dashboard and platform overview |
+| `/report` | Verify and submit waste reports |
+| `/collect` | Browse, map, accept, and verify collection tasks |
+| `/rewards` | View balance, transactions, and redeemable rewards |
+| `/leaderboard` | Community ranking |
+| `/download` | Staff-only PDF report downloads |
+| `/login` | Login guidance |
+| `/unauthorized` | Access-denied page |
 
-   ```bash
-   npm install
-   ```
-   
-5. Set up environment variables: Create a .env file in the root of the project and add your environment variables:
+## API routes
 
-   ```bash
-   NEXT_PUBLIC_DATABASE_URL=Your neonDB URL
-   NEXT_PUBLIC_WEB3_AUTH_CLIENT_ID=Web3Auth client ID
-   NEXT_PUBLIC_GEMINI_API_KEY=Google Gemini API key
-   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=Google maps API key
-   ```
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/verify-waste` | Verify report or collection images with Gemini |
+| `POST /api/report-images` | Validate and upload report images to Cloudinary |
+| `POST /api/detect-duplicate` | Compare a new image with nearby report images |
+| `POST /api/dispatch-explanation` | Explain a rule-based collector recommendation |
+| `GET /api/reports/download?type=...` | Generate a staff PDF report |
 
-6. Run the development server:
+## Technology stack
 
-   ```bash
-   npm run dev
-   ```
+- Next.js 14 App Router, React 18, and TypeScript
+- Tailwind CSS, Radix UI, and Lucide icons
+- Web3Auth
+- Neon PostgreSQL and Drizzle ORM
+- Google Gemini (`gemini-3.6-flash`)
+- Cloudinary image storage
+- Leaflet, React Leaflet, OpenStreetMap, and Nominatim
+- Puppeteer PDF generation
+- Jest and Testing Library
 
-7. Run tests:
+## Database model
 
-   ```bash
-   npm test
-   ```
+- `users` — identity, role, and creation date
+- `waste_cases` — one physical waste pile with coordinates and case status
+- `reports` — individual reports, AI result, location, image URL, and case link
+- `rewards` — user reward totals and reward metadata
+- `collected_wastes` — verified collection records
+- `notifications` — unread/read user messages
+- `transactions` — earned and redeemed point history
 
-## Usage
+## Local setup
 
-- **User Registration and Authentication**: Users and staff can register and log in via Web3Auth.
-- **Report Waste Locations**: Users can report waste locations through the platform, with automatic address completion powered by Google Maps API.
-- **Track Waste Collection**: Users can monitor the status of reported waste locations and the progress of waste collection.
-- **Generate Reports (for staff only)**: Staff can access data-driven reports generated by the system to track efficiency and areas of improvement.
-- **Earn Points**: Users earn points for reporting waste and helping with waste collection. These points contribute to the gamified leaderboard, encouraging user engagement.
+### Requirements
+
+- Node.js 20 LTS or newer
+- npm 10 or newer
+- PostgreSQL database (Neon is supported)
+- Web3Auth project credentials
+- Google Gemini API key
+- Cloudinary account credentials
+
+### Installation
+
+```bash
+git clone https://github.com/diaskalana/smart-waste-management-system.git
+cd smart-waste-management-system
+npm ci
+```
+
+Copy `.env.example` to `.env.local` and configure:
+
+```env
+DATABASE_URL=postgresql://user:password@host/database?sslmode=require
+NEXT_PUBLIC_WEB3_AUTH_CLIENT_ID=your_web3auth_client_id
+GEMINI_API_KEY=your_gemini_api_key
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+```
+
+`DATABASE_URL`, `GEMINI_API_KEY`, and all Cloudinary credentials are
+server-only. Do not expose them with a `NEXT_PUBLIC_` prefix.
+
+Create or update the schema:
+
+```bash
+npm run db:push
+```
+
+Start development:
+
+```bash
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Validation
+
+```bash
+npx tsc --noEmit
+npx jest --runInBand
+npm run build
+```
+
+The current Jest suite contains four passing tests covering PDF request
+validation and report-rendering helpers.
+
+## Current operational notes
+
+- External services require valid credentials and network access.
+- Public Nominatim is queried only after a user initiates search, reverse
+  geocoding, or location confirmation; it is not used as continuous
+  autocomplete.
+- Duplicate detection first narrows candidates by distance, then compares up
+  to three safe Cloudinary images with Gemini.
+- Dispatch selection is deterministic and rule-based. Gemini explains the
+  chosen result but does not replace the matching rules.
+- Reward persistence is implemented in the application database; Web3Auth is
+  used for authentication, not for on-chain reward settlement.
+- Staff report access depends on the user role stored in the database.
 
 ## Contributors
-- Weerasinghe C.D. 
-- Dias D.D.K.S. 
-- Sandeepa K.B.A.R. 
 
-Feel free to contribute to this project by forking the repository and submitting pull requests for enhancements or bug fixes.
+- Weerasinghe C.D.
+- Dias D.D.K.S.
+- Sandeepa K.B.A.R.
+
+Contributions through focused pull requests are welcome.

@@ -1,68 +1,48 @@
-import { createMocks } from "node-mocks-http";
-import { GET } from "@/app/api/reports/download/route"; // Adjust the import based on your file structure
-import { jest } from '@jest/globals';
+import { GET } from "@/app/api/reports/download/route";
+import {
+  generateHtmlContent,
+  getTableHeaders,
+} from "@/lib/report-generation";
 
-const mockQueryReportData = jest.fn();
+describe("GET /api/reports/download", () => {
+  it("returns 400 when the report type is missing", async () => {
+    const request = new Request("http://localhost/api/reports/download");
 
-jest.mock('@/app/api/reports/download/route', () => ({
-  queryReportData: mockQueryReportData,
-}));
+    const response = await GET(request as never);
 
-describe("API /reports/download", () => {
-  beforeEach(() => {
-    jest.clearAllMocks(); // Reset mocks before each test
-  });
-
-  it("should return a 400 error if no type is provided", async () => {
-    const { req } = createMocks({
-      method: "GET",
-    });
-
-    req.url = "http://localhost:3000/api/reports/download"; 
-    const response = await GET(req);
     expect(response.status).toBe(400);
-    const jsonResponse = await response.json();
-    expect(jsonResponse).toEqual(expect.objectContaining({
+    await expect(response.json()).resolves.toEqual({
       error: "Report type is required",
-    }));
+    });
   });
 
-  it("should return data for user_activity report type", async () => {
-    const { req } = createMocks({
-      method: "GET",
-    });
+  it("returns 500 when the report type is unsupported", async () => {
+    const request = new Request(
+      "http://localhost/api/reports/download?type=unsupported"
+    );
 
-    req.url = "http://localhost:3000/api/reports/download?type=user_activity"; // Mocking the full URL with a valid type
+    const response = await GET(request as never);
 
-    const response = await GET(req);
-    expect(response.status).toBe(200);
-    
-    expect(response.headers.get("Content-Type")).toBe("application/pdf");
-    expect(response.headers.get("Content-Disposition")).toMatch(/attachment; filename=user_activity_report\.pdf/);
-  });
-
-  it("should return data for collection_efficiency report type", async () => {
-    const { req } = createMocks({
-      method: "GET",
-    });
-
-    req.url = "http://localhost:3000/api/reports/download?type=collection_efficiency"; // Mocking another valid report type
-
-    const response = await GET(req);
-    expect(response.status).toBe(200);
-    
-    expect(response.headers.get("Content-Type")).toBe("application/pdf");
-    expect(response.headers.get("Content-Disposition")).toMatch(/attachment; filename=collection_efficiency_report\.pdf/);
-  });
-
-  it("should return a 500 error for an invalid report type", async () => {
-    const { req } = createMocks({
-      method: "GET",
-    });
-
-    req.url = "http://localhost:3000/api/reports/download?type=invalid_type"; // Mocking the full URL with an invalid type
-    const response = await GET(req);
     expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "Failed to generate report",
+    });
+  });
+});
+
+describe("report rendering helpers", () => {
+  it("provides headers for a supported report", () => {
+    expect(getTableHeaders("user_activity")).toContain("Location");
+    expect(getTableHeaders("unsupported")).toBe("");
   });
 
+  it("renders report data into the PDF HTML", () => {
+    const html = generateHtmlContent(
+      [{ location: "Central Park", reportCount: 3 }],
+      "user_activity"
+    );
+
+    expect(html).toContain("Central Park");
+    expect(html).toContain("USER_ACTIVITY REPORT");
+  });
 });

@@ -6,12 +6,12 @@ import {
   Trash,
   Coins,
   Medal,
-  Settings,
   Home,
   Download,
 } from "lucide-react";
 import { getUserByEmail } from "@/utils/db/actions";
 import { useEffect, useState } from "react";
+import { useLanguage } from "@/components/LanguageProvider";
 
 const sidebarItems = [
   { href: "/", icon: Home, label: "Home" },
@@ -23,9 +23,10 @@ const sidebarItems = [
 
 interface SidebarProps {
   open: boolean;
+  onClose: () => void;
 }
 
-export default function Sidebar({ open }: SidebarProps) {
+export default function Sidebar({ open, onClose }: SidebarProps) {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const pathname = usePathname();
   interface User {
@@ -37,6 +38,7 @@ export default function Sidebar({ open }: SidebarProps) {
   }
   
   const [user, setUser] = useState<User | null>(null);
+  const { t } = useLanguage();
 
   useEffect(() => {
     const getUserRole = async () => {
@@ -60,15 +62,24 @@ export default function Sidebar({ open }: SidebarProps) {
 
 
   return (
+    <>
+    {open && (
+      <button
+        type="button"
+        aria-label="Close navigation"
+        onClick={onClose}
+        className="fixed inset-0 z-20 bg-slate-950/35 backdrop-blur-[1px] lg:hidden"
+      />
+    )}
     <aside
-      className={`bg-white border-r pt-20 border-gray-200 text-gray-800 w-64 fixed inset-y-0 left-0 z-30 transform transition-transform duration-300 ease-in-out ${
+      className={`fixed inset-y-0 left-0 z-30 w-64 transform border-r border-gray-200 bg-white pt-16 text-gray-800 shadow-xl transition-transform duration-300 ease-in-out lg:pt-20 lg:shadow-none ${
         open ? "translate-x-0" : "-translate-x-full"
       } lg:translate-x-0`}
     >
-      <nav className="h-full flex flex-col justify-between">
+      <nav className="h-full flex flex-col">
         <div className="px-4 py-6 space-y-8">
           {sidebarItems.map((item) => (
-            <Link key={item.href} href={item.href} passHref>
+            <Link key={item.href} href={item.href} passHref onClick={onClose}>
               <Button
                 variant={pathname === item.href ? "secondary" : "ghost"}
                 className={`w-full justify-start py-3 ${
@@ -78,27 +89,13 @@ export default function Sidebar({ open }: SidebarProps) {
                 }`}
               >
                 <item.icon className="mr-3 h-5 w-5" />
-                <span className="text-base">{item.label}</span>
+                <span className="text-base">{t(item.label)}</span>
               </Button>
             </Link>
           ))}
         </div>
-        <div className="p-4 border-t border-gray-200">
-          <Link href="/settings" passHref>
-            <Button
-              variant={pathname === "/settings" ? "secondary" : "outline"}
-              className={`w-full py-3 ${
-                pathname === "/settings"
-                  ? "bg-green-100 text-green-800"
-                  : "text-gray-600 border-gray-300 hover:bg-gray-100"
-              }`}
-            >
-              <Settings className="mr-3 h-5 w-5" />
-              <span className="text-base">Settings</span>
-            </Button>
-          </Link>
-        </div>
       </nav>
     </aside>
+    </>
   );
 }

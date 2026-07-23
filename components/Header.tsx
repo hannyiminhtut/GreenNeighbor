@@ -1,19 +1,17 @@
-// @ts-nocheck
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import {
   Menu,
   Coins,
-  Leaf,
   Search,
   Bell,
   User,
   ChevronDown,
   LogIn,
-  LogOut,
+  Languages,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -23,23 +21,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Web3Auth } from "@web3auth/modal";
-import { CHAIN_NAMESPACES, IProvider, WEB3AUTH_NETWORK } from "@web3auth/base";
+import { CHAIN_NAMESPACES, WEB3AUTH_NETWORK } from "@web3auth/base";
 import { EthereumPrivateKeyProvider } from "@web3auth/ethereum-provider";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { toast } from "react-hot-toast";
 import {
   createUser,
   getUnreadNotifications,
   markNotificationAsRead,
   getUserByEmail,
-  getUserBalance,
+  getAllRewards,
 } from "@/utils/db/actions";
+import { calculateUserRewardScore } from "@/lib/reward-score";
+import { useLanguage } from "@/components/LanguageProvider";
 
-const clientId = process.env.NEXT_PUBLIC_WEB3_AUTH_CLIENT_ID;
+const clientId = process.env.NEXT_PUBLIC_WEB3_AUTH_CLIENT_ID ?? "";
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
   chainId: "0xaa36a7",
-  rpcTarget: "https://rpc.ankr.com/eth_sepolia",
+  rpcTarget: "https://ethereum-sepolia-rpc.publicnode.com",
   displayName: "Ethereum Sepolia Testnet",
   blockExplorerUrl: "https://sepolia.etherscan.io",
   ticker: "ETH",
@@ -53,7 +54,7 @@ const privateKeyProvider = new EthereumPrivateKeyProvider({
 
 const web3auth = new Web3Auth({
   clientId,
-  web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET, // Changed from SAPPHIRE_MAINNET to TESTNET
+  web3AuthNetwork: WEB3AUTH_NETWORK.SAPPHIRE_DEVNET,
   privateKeyProvider,
 });
 
@@ -62,24 +63,38 @@ interface HeaderProps {
   totalEarnings: number;
 }
 
+function normalizeBalance(value: unknown): number {
+  const numericValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numericValue) ? Math.max(numericValue, 0) : 0;
+}
+
+type WasteNotification = Awaited<
+  ReturnType<typeof getUnreadNotifications>
+>[number];
+
 export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
-  const [provider, setProvider] = useState<IProvider | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [userInfo, setUserInfo] = useState<any>(null);
-  const pathname = usePathname();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [userInfo, setUserInfo] = useState<
+    Awaited<ReturnType<typeof web3auth.getUserInfo>> | null
+  >(null);
+  const [notifications, setNotifications] = useState<WasteNotification[]>([]);
   const isMobile = useMediaQuery("(max-width: 768px)");
-  const [balance, setBalance] = useState(0);
+  const [balance, setBalance] = useState<number>(() =>
+    normalizeBalance(totalEarnings)
+  );
+  const { language, toggleLanguage, t } = useLanguage();
 
-  console.log("user info", userInfo);
+  useEffect(
+    () => setBalance(normalizeBalance(totalEarnings)),
+    [totalEarnings]
+  );
 
   useEffect(() => {
     const init = async () => {
       try {
         await web3auth.initModal();
-        setProvider(web3auth.provider);
-
         if (web3auth.connected) {
           setLoggedIn(true);
           const user = await web3auth.getUserInfo();
@@ -96,6 +111,11 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
         }
       } catch (error) {
         console.error("Error initializing Web3Auth:", error);
+        toast.error(
+          error instanceof Error
+            ? `Web3Auth initialization failed: ${error.message}`
+            : "Web3Auth initialization failed."
+        );
       } finally {
         setLoading(false);
       }
@@ -117,19 +137,33 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
 
     fetchNotifications();
 
+    const handleAccountDataUpdate = () => {
+      void fetchNotifications();
+    };
+    window.addEventListener("accountDataUpdated", handleAccountDataUpdate);
+
     // Set up periodic checking for new notifications
     const notificationInterval = setInterval(fetchNotifications, 30000); // Check every 30 seconds
 
-    return () => clearInterval(notificationInterval);
+    return () => {
+      clearInterval(notificationInterval);
+      window.removeEventListener(
+        "accountDataUpdated",
+        handleAccountDataUpdate
+      );
+    };
   }, [userInfo]);
 
   useEffect(() => {
     const fetchUserBalance = async () => {
-      if (userInfo && userInfo.email) {
-        const user = await getUserByEmail(userInfo.email);
+      const email = userInfo?.email || localStorage.getItem("userEmail");
+      if (email) {
+        const user = await getUserByEmail(email);
         if (user) {
-          const userBalance = await getUserBalance(user.id);
-          setBalance(userBalance);
+          const rewards = await getAllRewards();
+          setBalance(
+            normalizeBalance(calculateUserRewardScore(rewards, user.id))
+          );
         }
       }
     };
@@ -137,31 +171,29 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     fetchUserBalance();
 
     // Add an event listener for balance updates
-    const handleBalanceUpdate = (event: CustomEvent) => {
-      setBalance(event.detail);
+    const handleBalanceUpdate = (event: CustomEvent<unknown>) => {
+      setBalance(normalizeBalance(event.detail));
     };
 
     window.addEventListener(
       "balanceUpdated",
       handleBalanceUpdate as EventListener
     );
+    window.addEventListener("accountDataUpdated", fetchUserBalance);
 
     return () => {
       window.removeEventListener(
         "balanceUpdated",
         handleBalanceUpdate as EventListener
       );
+      window.removeEventListener("accountDataUpdated", fetchUserBalance);
     };
   }, [userInfo]);
 
   const login = async () => {
-    if (!web3auth) {
-      console.log("web3auth not initialized yet");
-      return;
-    }
+    setLoginLoading(true);
     try {
-      const web3authProvider = await web3auth.connect();
-      setProvider(web3authProvider);
+      await web3auth.connect();
       setLoggedIn(true);
       const user = await web3auth.getUserInfo();
       setUserInfo(user);
@@ -171,12 +203,6 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
       if (user.email) {
         localStorage.setItem("userEmail", user.email);
         
-        setCookie("userEmail", user.email, {
-          httpOnly: true, 
-          secure: process.env.NODE_ENV === "production", 
-          sameSite: "Strict", 
-        });
-
         try {
           await createUser(user.email, user.name || "Anonymous User");
         } catch (error) {
@@ -186,6 +212,13 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
       }
     } catch (error) {
       console.error("Error during login:", error);
+      toast.error(
+        error instanceof Error
+          ? `Login failed: ${error.message}`
+          : "Login failed. Please try again."
+      );
+    } finally {
+      setLoginLoading(false);
     }
   };
 
@@ -196,7 +229,6 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
     }
     try {
       await web3auth.logout();
-      setProvider(null);
       setLoggedIn(false);
       setUserInfo(null);
       localStorage.removeItem("userEmail");
@@ -235,31 +267,38 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
   }
 
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-      <div className="flex items-center justify-between px-4 py-2">
-        <div className="flex items-center">
+    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white">
+      <div className="flex min-h-16 items-center justify-between gap-1 px-2 py-2 sm:gap-2 sm:px-4">
+        <div className="flex min-w-0 items-center">
           <Button
             variant="ghost"
             size="icon"
-            className="mr-2 md:mr-4"
+            className="mr-1 shrink-0 md:mr-3"
             onClick={onMenuClick}
           >
             <Menu className="h-6 w-6" />
           </Button>
           <Link href="/" className="flex items-center">
-            <Leaf className="h-6 w-6 md:h-8 md:w-8 text-green-500 mr-1 md:mr-2" />
-            <div className="flex flex-col">
+            <Image
+              src="/green-neighbor-logo.png"
+              alt="GreenNeighbor logo"
+              width={44}
+              height={44}
+              priority
+              className="mr-2 h-9 w-9 rounded-lg object-cover md:h-11 md:w-11"
+            />
+            <div className="hidden min-w-0 flex-col sm:flex">
               <span className="font-bold text-base md:text-lg text-gray-800">
-                WasteManagement
+                GreenNeighbor
               </span>
               <span className="text-[8px] md:text-[10px] text-gray-500 -mt-1">
-                Smart Waste Management System
+                {t("Smart Waste Management System")}
               </span>
             </div>
           </Link>
         </div>
         {!isMobile && (
-          <div className="flex-1 max-w-xl mx-4">
+          <div className="mx-3 hidden max-w-xl flex-1 md:block">
             <div className="relative">
               <input
                 type="text"
@@ -270,15 +309,22 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
             </div>
           </div>
         )}
-        <div className="flex items-center">
-          {isMobile && (
-            <Button variant="ghost" size="icon" className="mr-2">
-              <Search className="h-5 w-5" />
-            </Button>
-          )}
+        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={toggleLanguage}
+            aria-label={
+              language === "en" ? "Switch to Burmese" : "Switch to English"
+            }
+            className="h-9 rounded-full px-2 text-xs font-semibold text-emerald-700 sm:px-3"
+          >
+            <Languages className="mr-1 h-4 w-4" />
+            {language === "en" ? "မြန်" : "EN"}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="mr-2 relative">
+              <Button variant="ghost" size="icon" className="relative h-9 w-9">
                 <Bell className="h-5 w-5" />
                 {notifications.length > 0 && (
                   <Badge className="absolute -top-1 -right-1 px-1 min-w-[1.2rem] h-5">
@@ -307,7 +353,7 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <div className="mr-2 md:mr-4 flex items-center bg-gray-100 rounded-full px-2 md:px-3 py-1">
+          <div className="flex h-9 items-center rounded-full bg-gray-100 px-2 sm:px-3">
             <Coins className="h-4 w-4 md:h-5 md:w-5 mr-1 text-green-500" />
             <span className="font-semibold text-sm md:text-base text-gray-800">
               {balance.toFixed(2)}
@@ -316,10 +362,13 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
           {!loggedIn ? (
             <Button
               onClick={login}
-              className="bg-green-600 hover:bg-green-700 text-white text-sm md:text-base"
+              disabled={loginLoading}
+              className="h-9 w-9 bg-green-600 p-0 text-white hover:bg-green-700 sm:w-auto sm:px-4"
             >
-              Login
-              <LogIn className="ml-1 md:ml-2 h-4 w-4 md:h-5 md:w-5" />
+              <span className="hidden sm:inline">
+                {loginLoading ? t("Connecting...") : t("Login")}
+              </span>
+              <LogIn className="h-4 w-4 sm:ml-2" />
             </Button>
           ) : (
             <DropdownMenu>
@@ -340,7 +389,6 @@ export default function Header({ onMenuClick, totalEarnings }: HeaderProps) {
                 <DropdownMenuItem>
                   <Link href="/settings">Profile</Link>
                 </DropdownMenuItem>
-                <DropdownMenuItem>Settings</DropdownMenuItem>
                 <DropdownMenuItem onClick={logout}>Sign Out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

@@ -5,9 +5,11 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/Header";
 import Sidebar from "@/components/Sidebar";
-// import "leaflet/dist/leaflet.css";
+import "leaflet/dist/leaflet.css";
 import { Toaster } from "react-hot-toast";
-import { getAvailableRewards, getUserByEmail } from "@/utils/db/actions";
+import { getAllRewards, getUserByEmail } from "@/utils/db/actions";
+import { calculateUserRewardScore } from "@/lib/reward-score";
+import { LanguageProvider } from "@/components/LanguageProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -28,12 +30,8 @@ export default function RootLayout({
           console.log("user from layout", user);
 
           if (user) {
-            const availableRewards = (await getAvailableRewards(
-              user.id
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            )) as any;
-            console.log("availableRewards from layout", availableRewards);
-            setTotalEarnings(availableRewards);
+            const rewards = await getAllRewards();
+            setTotalEarnings(calculateUserRewardScore(rewards, user.id));
           }
         }
       } catch (error) {
@@ -46,20 +44,22 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={`${inter.className} overflow-x-hidden`}>
+        <LanguageProvider>
         <div className="min-h-screen bg-gray-50 flex flex-col">
           <Header
             onMenuClick={() => setSidebarOpen(!sidebarOpen)}
             totalEarnings={totalEarnings}
           />
           <div className="flex flex-1">
-            <Sidebar open={sidebarOpen} />
-            <main className="flex-1 p-4 lg:p-8 ml-0 lg:ml-64 transition-all duration-300">
+            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+            <main className="ml-0 min-w-0 flex-1 p-2 transition-all duration-300 sm:p-4 lg:ml-64 lg:p-8">
               {children}
             </main>
           </div>
         </div>
         <Toaster />
+        </LanguageProvider>
       </body>
     </html>
   );

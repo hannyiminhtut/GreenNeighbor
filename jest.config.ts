@@ -15,7 +15,7 @@ const config: Config = {
   coverageProvider: 'v8',
   testEnvironment: 'node',
   // Add more setup options before each test is run
-  // setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
+  setupFiles: ['<rootDir>/jest.setup.ts'],
 
   // Add TypeScript support
   preset: 'ts-jest',

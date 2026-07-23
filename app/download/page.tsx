@@ -15,7 +15,6 @@ export default function DownloadsPage() {
           return;
         }
         setUserRole("user");
-        console.log("User Role:", userRole);
       }
     };
 
@@ -49,17 +48,17 @@ export default function DownloadsPage() {
   ];
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl px-2 py-4 sm:p-6 lg:p-8">
       <h1 className="text-3xl font-semibold mb-6 text-gray-800">
         Download Reports
       </h1>
 
       {/* User Activity Reports */}
-      <div className="bg-white p-8 rounded-2xl shadow-lg mb-12">
+      <div className="mb-8 rounded-2xl bg-white p-4 shadow-lg sm:mb-12 sm:p-8">
         <h2 className="text-2xl font-semibold mb-4 text-gray-700">
           User Activity Reports
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 mb-8">
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-8">
           {userActivityReports.map((report) => (
             <ReportDownloadButton
               key={report.reportType}
@@ -71,11 +70,11 @@ export default function DownloadsPage() {
       </div>
 
       {/* Waste Collection Reports */}
-      <div className="bg-white p-8 rounded-2xl shadow-lg mb-12">
+      <div className="mb-8 rounded-2xl bg-white p-4 shadow-lg sm:mb-12 sm:p-8">
         <h2 className="text-2xl font-semibold mb-4 text-gray-700">
           Waste Collection Reports
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-8">
           {wasteCollectionReports.map((report) => (
             <ReportDownloadButton
               key={report.reportType}

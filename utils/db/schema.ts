@@ -1,4 +1,4 @@
-import { integer, varchar, pgTable, serial, text, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { integer, varchar, pgTable, serial, text, timestamp, jsonb, boolean, doublePrecision, real } from "drizzle-orm/pg-core";
 
 // Users table
 export const Users = pgTable("users", {
@@ -7,6 +7,16 @@ export const Users = pgTable("users", {
   name: varchar("name", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   role: varchar("role", { length: 255 }).notNull().default("user"),
+});
+
+// A case represents one physical waste pile. Multiple reports may confirm it.
+export const WasteCases = pgTable("waste_cases", {
+  id: serial("id").primaryKey(),
+  latitude: doublePrecision("latitude").notNull(),
+  longitude: doublePrecision("longitude").notNull(),
+  status: varchar("status", { length: 30 }).notNull().default("open"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 // Reports table
@@ -21,6 +31,10 @@ export const Reports = pgTable("reports", {
   status: varchar("status", { length: 255 }).notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   collectorId: integer("collector_id").references(() => Users.id),
+  latitude: doublePrecision("latitude"),
+  longitude: doublePrecision("longitude"),
+  caseId: integer("case_id").references(() => WasteCases.id),
+  duplicateConfidence: real("duplicate_confidence"),
 });
 
 // Rewards table
