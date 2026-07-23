@@ -171,8 +171,5 @@ validation and report-rendering helpers.
 
 ## Contributors
 
-- Weerasinghe C.D.
-- Dias D.D.K.S.
-- Sandeepa K.B.A.R.
 
 Contributions through focused pull requests are welcome.
